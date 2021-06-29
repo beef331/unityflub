@@ -1,12 +1,16 @@
-import puppy
+import puppy, illwill
 import std/[htmlparser, xmltree, strscans, tables, strformat, strutils, os, osproc]
 
 const
   archiveUrl = "https://unity3d.com/get-unity/download/archive"
   hubUrl = "https://public-cdn.cloud.unity3d.com/hub/prod/UnityHub.AppImage?button=onboarding-download-btn-linux"
   hubFile = "./UnityHub.appimage"
+  years = ["2021", "2020", "2019", "2018", "5"]
 
 type
+  State = enum
+    yearSelect
+    versionSelect
   Entry = object
     url, year, subVer: string
 
@@ -26,35 +30,76 @@ func getAllHubVersions(node: XmlNode): seq[Entry] =
     if node.attr"href".scanf("unityhub://$+.$+/", entry.year, entry.subVer):
       result.add entry
 
-proc subVersion(entries: seq[Entry]) =
-  for i, entry in entries:
-    echo fmt"{i}) {entry}"
-  while true:
-    let input = readLine(stdin)
-    try:
-      let val = parseInt(input)
-      echo fmt"Installing {entries[val]}"
-      discard startProcess(hubFile, getCurrentDir(), [entries[val].url])
-      return
-    except:
-      echo "Invalid value, try again"
+proc exitProc() {.noconv.} =
+  illwillDeinit()
+  showCursor()
+  quit(0)
 
-proc main() =
-  let archive = fetch(archiveUrl).parseHtml.getAllHubVersions.toGroupedTable
+# Fetches and sorts the versions
+let archive = fetch(archiveUrl).parseHtml.getAllHubVersions.toGroupedTable
 
-  if not fileExists(hubFile):
-    echo "Attempting to download UnityHub"
-    let hub = fetch(hubUrl)
-    writeFile(hubFile, hub)
-  hubFile.setFilePermissions({fpUserExec, fpUserRead, fpUserWrite})
+# Get Unity Hub if it's not in this CWD
+if not fileExists(hubFile):
+  echo "Attempting to download UnityHub"
+  let hub = fetch(hubUrl)
+  writeFile(hubFile, hub)
+hubFile.setFilePermissions({fpUserExec, fpUserRead, fpUserWrite})
 
-  while true:
-    echo "Enter start version (2021, 2020, 2019, 2018, 5), then press enter."
-    let input = stdin.readLine
-    if input in archive:
-      subVersion(archive[input])
-      return
-    else:
-      echo "Invalid Input, try again."
+illwillInit(fullscreen = true)
+setControlCHook(exitProc)
+hideCursor()
 
-main()
+var tb = newTerminalBuffer(terminalWidth(), terminalHeight())
+var
+  currentState = yearSelect
+  selectedVersions: seq[Entry]
+  cursor = 0
+
+while true:
+  tb.clear()
+  case currentState:
+  of yearSelect:
+    tb.write(0, 0, "Choose a major version, press Enter to confirm:")
+    for i, x in years:
+      if i == cursor:
+        tb.setForegroundColor(fgBlue)
+      else:
+        tb.setForegroundColor(fgWhite)
+      tb.write(1, (i + 1), x)
+    case getKey()
+    of W, Up, H:
+      cursor = (cursor - 1 + years.len) mod years.len
+    of S, Down, J:
+      cursor = (cursor + 1 + years.len) mod years.len
+    of Enter:
+      currentState = versionSelect
+      selectedVersions = archive[years[cursor]]
+      cursor = 0
+    of Escape, Q:
+      break
+    else: discard
+  of versionSelect:
+    tb.write(0, 0, "Choose a minor version")
+    for x in 0 .. 10:
+      let i = (x + cursor) mod selectedVersions.len
+      if x == 0:
+        tb.setForegroundColor(fgBlue)
+      else:
+        tb.setForegroundColor(fgWhite)
+      tb.write(8, (x + 1), $selectedVersions[i])
+      tb.setForegroundColor(fgWhite)
+    case getKey()
+    of W, Up, H:
+      cursor = (cursor - 1 + selectedVersions.len) mod selectedVersions.len
+    of S, Down, J:
+      cursor = (cursor + 1 + selectedVersions.len) mod selectedVersions.len
+    of Enter:
+      discard startProcess(hubFile, getCurrentDir(), [selectedVersions[cursor].url])
+      break
+    of Escape, Q:
+      currentState = yearSelect
+    else: discard
+  tb.setForegroundColor(fgWhite)
+  tb.display()
+
+exitProc()

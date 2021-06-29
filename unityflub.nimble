@@ -12,3 +12,4 @@ bin           = @["unityflub"]
 
 requires "nim >= 1.4.0"
 requires "puppy >= 1.0.3"
+requires "illwill >= 0.20.0"
