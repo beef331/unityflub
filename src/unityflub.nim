@@ -1,5 +1,5 @@
 import puppy, illwill
-import std/[htmlparser, xmltree, strscans, tables, strformat, strutils, os, osproc]
+import std/[htmlparser, xmltree, strscans, tables, strformat, os, osproc]
 
 const
   archiveUrl = "https://unity3d.com/get-unity/download/archive"
@@ -35,71 +35,75 @@ proc exitProc() {.noconv.} =
   showCursor()
   quit(0)
 
-# Fetches and sorts the versions
-let archive = fetch(archiveUrl).parseHtml.getAllHubVersions.toGroupedTable
+proc setupUnityHub() =
+  # Get Unity Hub if it's not in this CWD
+  if not fileExists(hubFile):
+    echo "Attempting to download UnityHub"
+    let hub = fetch(hubUrl)
+    writeFile(hubFile, hub)
+  hubFile.setFilePermissions({fpUserExec, fpUserRead, fpUserWrite})
 
-# Get Unity Hub if it's not in this CWD
-if not fileExists(hubFile):
-  echo "Attempting to download UnityHub"
-  let hub = fetch(hubUrl)
-  writeFile(hubFile, hub)
-hubFile.setFilePermissions({fpUserExec, fpUserRead, fpUserWrite})
 
-illwillInit(fullscreen = true)
-setControlCHook(exitProc)
-hideCursor()
 
-var tb = newTerminalBuffer(terminalWidth(), terminalHeight())
-var
-  currentState = yearSelect
-  selectedVersions: seq[Entry]
-  cursor = 0
+proc main() =
+  # Fetches and sorts the versions
+  let archive = fetch(archiveUrl).parseHtml.getAllHubVersions.toGroupedTable
+  setupUnityHub()
+  illwillInit(fullscreen = true)
+  setControlCHook(exitProc)
+  hideCursor()
+  var
+    tb = newTerminalBuffer(terminalWidth(), terminalHeight())
+    currentState = yearSelect
+    selectedVersions: seq[Entry]
+    cursor = 0
 
-while true:
-  tb.clear()
-  case currentState:
-  of yearSelect:
-    tb.write(0, 0, "Choose a major version, press Enter to confirm:")
-    for i, x in years:
-      if i == cursor:
-        tb.setForegroundColor(fgBlue)
-      else:
+  while true:
+    tb.clear()
+    case currentState:
+    of yearSelect:
+      tb.write(0, 0, "Choose a major version, press Enter to confirm:")
+      for i, x in years:
+        if i == cursor:
+          tb.setForegroundColor(fgBlue)
+        else:
+          tb.setForegroundColor(fgWhite)
+        tb.write(1, (i + 1), x)
+      case getKey()
+      of W, Up, H:
+        cursor = (cursor - 1 + years.len) mod years.len
+      of S, Down, J:
+        cursor = (cursor + 1 + years.len) mod years.len
+      of Enter:
+        currentState = versionSelect
+        selectedVersions = archive[years[cursor]]
+        cursor = 0
+      of Escape, Q:
+        break
+      else: discard
+    of versionSelect:
+      tb.write(0, 0, "Choose a minor version")
+      for x in 0 .. 10:
+        let i = (x + cursor) mod selectedVersions.len
+        if x == 0:
+          tb.setForegroundColor(fgBlue)
+        else:
+          tb.setForegroundColor(fgWhite)
+        tb.write(8, (x + 1), $selectedVersions[i])
         tb.setForegroundColor(fgWhite)
-      tb.write(1, (i + 1), x)
-    case getKey()
-    of W, Up, H:
-      cursor = (cursor - 1 + years.len) mod years.len
-    of S, Down, J:
-      cursor = (cursor + 1 + years.len) mod years.len
-    of Enter:
-      currentState = versionSelect
-      selectedVersions = archive[years[cursor]]
-      cursor = 0
-    of Escape, Q:
-      break
-    else: discard
-  of versionSelect:
-    tb.write(0, 0, "Choose a minor version")
-    for x in 0 .. 10:
-      let i = (x + cursor) mod selectedVersions.len
-      if x == 0:
-        tb.setForegroundColor(fgBlue)
-      else:
-        tb.setForegroundColor(fgWhite)
-      tb.write(8, (x + 1), $selectedVersions[i])
-      tb.setForegroundColor(fgWhite)
-    case getKey()
-    of W, Up, H:
-      cursor = (cursor - 1 + selectedVersions.len) mod selectedVersions.len
-    of S, Down, J:
-      cursor = (cursor + 1 + selectedVersions.len) mod selectedVersions.len
-    of Enter:
-      discard startProcess(hubFile, getCurrentDir(), [selectedVersions[cursor].url])
-      break
-    of Escape, Q:
-      currentState = yearSelect
-    else: discard
-  tb.setForegroundColor(fgWhite)
-  tb.display()
-
+      case getKey()
+      of W, Up, H:
+        cursor = (cursor - 1 + selectedVersions.len) mod selectedVersions.len
+      of S, Down, J:
+        cursor = (cursor + 1 + selectedVersions.len) mod selectedVersions.len
+      of Enter:
+        discard startProcess(hubFile, getCurrentDir(), [selectedVersions[cursor].url])
+        break
+      of Escape, Q:
+        currentState = yearSelect
+      else: discard
+    tb.setForegroundColor(fgWhite)
+    tb.display()
+    sleep(40)
+main()
 exitProc()
